@@ -1,59 +1,88 @@
 import "./style.css";
-import { DES, DESOptions } from "../dist";
+import {
+  DES,
+  TripleDES,
+  DESEncodingType,
+  DESModeType,
+  DESOptions,
+  DESPaddingType,
+  DESBase,
+} from "../lib";
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div>
     <h1>CryptoJS DES</h1>
-    <div class="card">
-      <p class="read-the-docs">
+    <div class='card'>
+      <p class='read-the-docs'>
       CryptoJS is ${DES ? "defined" : "undefined"}
       </p>
     </div>
   </div>
 `;
 
-const key = "AlVovFvcheqCGvkS2mojTILoFbhOjf1HFqGP9TAGAAq4";
-const message = "Hello World | 你好 | Привет";
+const key = "72c3c22abf65cd99fd9f6d97210eef8bd06ebe40a9e8e3dac693fa50630640";
+const message = "Hello World"; //  | 你好 | Привет
+const iv = "1234";
 
-function des_ecb_pkcs7() {
+function des(
+  algo: DESBase,
+  mode: DESModeType,
+  padding: DESPaddingType,
+  encoding: DESEncodingType,
+  isTriple: boolean = false
+) {
+  const kind = `${mode}-${padding}-${encoding}`;
   const options: DESOptions = {
-    mode: DES.mode.ECB,
-    padding: DES.pad.Pkcs7,
-    encoding: DES.enc.Hex,
+    mode,
+    padding,
+    ciphertextEncoding: encoding,
+    iv,
   };
 
-  let encrypted = DES.encrypt(message, key, options);
-  let decrypted = DES.decrypt(encrypted, key, options);
-  console.log("encrypt [ECB-Pkcs7-Hex]:", encrypted.toString());
-  console.log("decrypt [ECB-Pkcs7-Hex]:", decrypted.toString());
+  console.log(
+    `-------------------${isTriple ? "Triple" : ""} ${kind} -------------------`
+  );
 
-  options.encoding = DES.enc.Base64;
-  encrypted = DES.encrypt(message, key, options);
-  decrypted = DES.decrypt(encrypted, key, options);
-  console.log("encrypt [ECB-Pkcs7-Base64]:", encrypted.toString());
-  console.log("decrypt [ECB-Pkcs7-Base64]:", decrypted.toString());
-}
+  try {
+    const encrypted = algo.encrypt(message, key, options);
+    console.log(`encrypt:`, encrypted.toString());
+    const decrypted = algo.decrypt(encrypted, key, options);
+    console.log(`decrypt:`, decrypted.toString());
+  } catch (e) {
+    console.error(e);
+  }
 
-function des_ecb_zero_padding() {
-  const options: DESOptions = {
-    mode: DES.mode.ECB,
-    padding: DES.pad.ZeroPadding,
-    encoding: DES.enc.Hex,
-  };
-
-  let encrypted = DES.encrypt(message, key, options);
-  let decrypted = DES.decrypt(encrypted, key, options);
-  console.log("encrypt [ECB-ZeroPadding-Hex]:", encrypted.toString());
-  console.log("decrypt [ECB-ZeroPadding-Hex]:", decrypted.toString());
-
-  options.encoding = DES.enc.Base64;
-  encrypted = DES.encrypt(message, key, options);
-  decrypted = DES.decrypt(encrypted, key, options);
-  console.log("encrypt [ECB-ZeroPadding-Base64]:", encrypted.toString());
-  console.log("decrypt [ECB-ZeroPadding-Base64]:", decrypted.toString());
+  console.log("\n");
 }
 
 (function () {
-  des_ecb_pkcs7();
-  des_ecb_zero_padding();
+  const modes = Object.values(DES.mode);
+  const paddings = Object.values(DES.pad);
+  const encodings = Object.values(DES.enc);
+
+  modes.forEach((mode) => {
+    paddings.forEach((padding) => {
+      encodings.forEach((encoding) => {
+        des(DES, mode, padding, encoding);
+        des(TripleDES, mode, padding, encoding, true);
+      });
+    });
+  });
 })();
+
+const encrypted = DES.encrypt(message, key, {
+  mode: DES.mode.CBC,
+  padding: DES.pad.NoPadding,
+  ciphertextEncoding: DES.enc.Base64,
+  keyEncoding: DES.enc.Hex,
+  iv,
+});
+console.log(`encrypt:`, encrypted.toString());
+const decrypted = DES.decrypt(encrypted, key, {
+  mode: DES.mode.CBC,
+  padding: DES.pad.NoPadding,
+  ciphertextEncoding: DES.enc.Base64,
+  keyEncoding: DES.enc.Hex,
+  iv,
+});
+console.log(`decrypt:`, decrypted.toString());

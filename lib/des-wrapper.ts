@@ -4,9 +4,34 @@ import "./mode";
 import "./pad";
 import "./des";
 
-type DESModeType = "ECB" | "CBC" | "CFB" | "OFB" | "CTR";
+interface Encoding {
+  stringify: (message: string | WordArray) => string;
+  parse: (message: string | WordArray) => WordArray;
+}
 
-type DESPaddingType =
+interface WordArray {
+  ciphertext: string;
+  words: number[];
+  sigBytes: number;
+  toString: (encoding?: Encoding) => string;
+}
+
+interface Algorithm {
+  encrypt(
+    message: string | WordArray,
+    key: string | WordArray,
+    options: any
+  ): WordArray;
+  decrypt(
+    ciphertext: string | WordArray,
+    key: string | WordArray,
+    options: any
+  ): WordArray;
+}
+
+export type DESModeType = "ECB" | "CBC" | "CFB" | "OFB" | "CTR";
+
+export type DESPaddingType =
   | "Pkcs7"
   | "ZeroPadding"
   | "NoPadding"
@@ -14,7 +39,7 @@ type DESPaddingType =
   | "Iso97971"
   | "AnsiX923";
 
-type DESEncodingType = "utf8" | "hex" | "base64";
+export type DESEncodingType = "hex" | "base64";
 
 enum DESMode {
   ECB = "ECB",
@@ -65,7 +90,7 @@ export interface DESOptions {
   padding: DESPaddingType | DESPadding;
 
   /** The initialization vector */
-  iv?: string;
+  iv?: string | WordArray;
 
   /**
    * The ciphertext encoding scheme, default is `hex`.
@@ -74,73 +99,124 @@ export interface DESOptions {
    * or
    * { encoding: 'base64' }
    */
-  encoding?: DESEncodingType | DESEncoding;
+  ciphertextEncoding?: DESEncodingType | DESEncoding;
+
+  /**
+   * The ciphertext encoding scheme, default is `utf8`.
+   * @example
+   * { encoding: DES.enc.Base64 }
+   * or
+   * { encoding: 'base64' }
+   */
+  keyEncoding?: DESEncodingType | DESEncoding;
 }
 
-export class DES {
-  public static readonly mode = DESMode;
+export interface DESBase {
+  encrypt(message: string, key: string, options: DESOptions): string | never;
+  decrypt(ciphertext: string, key: string, options: DESOptions): string | never;
+}
 
-  public static readonly pad = DESPadding;
+interface CryptoArgs {
+  input: string;
+  key: string;
+  options: DESOptions;
+}
 
-  public static readonly enc = DESEncoding;
+abstract class DESImpl {
+  public readonly mode = DESMode;
+
+  public readonly pad = DESPadding;
+
+  public readonly enc = DESEncoding;
 
   /**
    * Encrypts the given message using the given key and options.
-   * @param {string} message The message to encrypt.
-   * @param {string} key The key to use for encryption.
-   * @param {DESOptions} options The options to use for encryption.
+   * @param {string} message - The message to encrypt.
+   * @param {string} key - The key to use for encryption.
+   * @param {DESOptions} options - The options to use for encryption.
    * @returns {string} The encrypted message.
    */
-  public static encrypt(
-    message: string,
-    key: string,
-    options: DESOptions
-  ): string {
-    const encrypted = CryptoJS.DES.encrypt(
-      message,
-      CryptoJS.enc.Utf8.parse(key),
-      {
-        mode: DES.getMode(options.mode),
-        padding: DES.getPadding(options.padding),
-        iv: options.iv ? CryptoJS.enc.Utf8.parse(options.iv) : undefined,
-      }
-    );
+  protected static doEncrypt(
+    algo: Algorithm,
+    args: CryptoArgs
+  ): string | never {
+    const { input, key, options } = args;
+    const { keyEncoding } = options;
 
-    if (!options.encoding || options.encoding === "hex") {
+    // 如果使用 NoPadding 填充方式进行加密，需要注意以下几点：
+    // 1. 明文长度必须是 8 字节的倍数，否则加密过程会报错；
+    // 2. 密钥和初始向量必须是 WordArray 对象，而不是字符串；
+    // 3. 密文必须是 Base64 编码的字符串，而不是十六进制或其他格式的数据；
+    if (options.padding === DESPadding.NoPadding) {
+      const messageHex = CryptoJS.enc.Hex.stringify(
+        CryptoJS.enc.Utf8.parse(args.input)
+      );
+      if (messageHex.length % 2 !== 0) {
+        throw new Error("[DES] Input length not multiple of 8 bytes");
+      }
+    }
+
+    const encrypted = algo.encrypt(input, DESImpl.encodeKey(key, keyEncoding), {
+      mode: DESImpl.getMode(options.mode),
+      padding: DESImpl.getPadding(options.padding),
+      iv: CryptoJS.enc.Hex.parse(options.iv ?? ""),
+    });
+
+    const { ciphertextEncoding } = options;
+    if (!ciphertextEncoding || ciphertextEncoding === DESEncoding.Hex) {
       return CryptoJS.enc.Hex.stringify(encrypted.ciphertext);
     }
-
-    if (options.encoding === "base64") {
+    if (ciphertextEncoding === DESEncoding.Base64) {
       return CryptoJS.enc.Base64.stringify(encrypted.ciphertext);
     }
-
-    throw new Error(`[DES] Invalid 'encoding' (${options.encoding})`);
+    throw new Error(
+      `[DES] Invalid 'ciphertextEncoding' (${ciphertextEncoding})`
+    );
   }
 
   /**
    * Decrypts a ciphertext using the given key and options.
-   * @param {string} ciphertext The ciphertext to decrypt.
-   * @param {string} key The key to use for decryption.
-   * @param {DESDecryptOptions} options The options to use for decryption.
-   * @returns The decrypted ciphertext.
+   * @param {string} ciphertext - The ciphertext to decrypt.
+   * @param {string} key - The key to use for decryption.
+   * @param {DESOptions} options - The options to use for decryption.
+   * @returns {string} The decrypted ciphertext.
    */
-  public static decrypt(
-    ciphertext: string,
-    key: string,
-    options: DESOptions
-  ): string {
-    const decrypted = CryptoJS.DES.decrypt(
-      ciphertext,
-      CryptoJS.enc.Utf8.parse(key),
+  protected static doDecrypt(
+    algo: Algorithm,
+    args: CryptoArgs
+  ): string | never {
+    const { input, key, options } = args;
+    const { keyEncoding, ciphertextEncoding } = options;
+
+    CryptoJS.enc.Base64.parse(args.input);
+    const decrypted = algo.decrypt(
+      input,
+      DESImpl.encodeKey(key, keyEncoding),
       {
-        mode: DES.getMode(options.mode),
-        padding: DES.getPadding(options.padding),
-        iv: options.iv ? CryptoJS.enc.Utf8.parse(options.iv) : undefined,
-        format: DES.getFormat(options.encoding),
+        mode: DESImpl.getMode(options.mode),
+        padding: DESImpl.getPadding(options.padding),
+        iv: CryptoJS.enc.Hex.parse(options.iv ?? ""),
+        format: DESImpl.getFormat(ciphertextEncoding),
       }
     );
 
     return decrypted.toString(CryptoJS.enc.Utf8);
+  }
+
+  private static encodeKey(key: string, encoding?: DESEncodingType): WordArray {
+    switch (encoding) {
+      case DESEncoding.Base64:
+        return CryptoJS.enc.Base64.parse(key);
+      case DESEncoding.Hex:
+        return CryptoJS.enc.Hex.parse(key);
+      default:
+        break;
+    }
+    if (!encoding) {
+      return CryptoJS.enc.Utf8.parse(key);
+    } else {
+      throw new Error(`[DES] Invalid 'keyEncoding' '${encoding}'`);
+    }
   }
 
   private static getMode(mode: DESModeType) {
@@ -191,7 +267,82 @@ export class DES {
     if (!encoding) {
       return CryptoJS.format.Hex;
     } else {
-      throw new Error(`[DES] Decrypt - Invalid 'encoding' '${encoding}'`);
+      throw new Error(`[DES] Invalid 'ciphertextEncoding' '${encoding}'`);
     }
   }
 }
+
+export const DES = new (class DES extends DESImpl implements DESBase {
+  /**
+   * Encrypts the given message using the given key and options.
+   * @param {string} message - The message to encrypt.
+   * @param {string} key - The key to use for encryption.
+   * @param {DESOptions} options - The options to use for encryption.
+   * @returns {string} - The encrypted message.
+   */
+  public encrypt(
+    message: string,
+    key: string,
+    options: DESOptions
+  ): string | never {
+    return DESImpl.doEncrypt(CryptoJS.DES, { input: message, key, options });
+  }
+
+  /**
+   * Decrypts a ciphertext using the given key and options.
+   * @param {string} ciphertext - The ciphertext to decrypt.
+   * @param {string} key - The key to use for decryption.
+   * @param {DESOptions} options - The options to use for decryption.
+   * @returns The decrypted ciphertext.
+   */
+  public decrypt(
+    ciphertext: string,
+    key: string,
+    options: DESOptions
+  ): string | never {
+    return DESImpl.doDecrypt(CryptoJS.DES, { input: ciphertext, key, options });
+  }
+})();
+
+export const TripleDES = new (class TripleDES
+  extends DESImpl
+  implements DESBase
+{
+  /**
+   * Encrypts the given message using the given key and options.
+   * @param {string} message - The message to encrypt.
+   * @param {string} key - The key to use for encryption.
+   * @param {DESOptions} options - The options to use for encryption.
+   * @returns {string} - The encrypted message.
+   */
+  public encrypt(
+    message: string,
+    key: string,
+    options: DESOptions
+  ): string | never {
+    return DESImpl.doEncrypt(CryptoJS.TripleDES, {
+      input: message,
+      key,
+      options,
+    });
+  }
+
+  /**
+   * Decrypts a ciphertext using the given key and options.
+   * @param {string} ciphertext - The ciphertext to decrypt.
+   * @param {string} key - The key to use for decryption.
+   * @param {DESOptions} options - The options to use for decryption.
+   * @returns The decrypted ciphertext.
+   */
+  public decrypt(
+    ciphertext: string,
+    key: string,
+    options: DESOptions
+  ): string | never {
+    return DESImpl.doDecrypt(CryptoJS.TripleDES, {
+      input: ciphertext,
+      key,
+      options,
+    });
+  }
+})();

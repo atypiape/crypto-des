@@ -1,2 +1,2 @@
-export { DES } from './des-wrapper';
-export type { DESOptions } from './des-wrapper';
+export { DES, TripleDES } from "./des-wrapper";
+export type * from "./des-wrapper";
